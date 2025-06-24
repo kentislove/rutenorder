@@ -27,7 +27,7 @@ SECRET_KEY = os.getenv('RUTEN_SECRET_KEY')
 SALT_KEY = os.getenv('RUTEN_SALT_KEY')
 
 # 增加啟動日誌，確認環境變數是否成功載入
-print("--- Ruten Proxy Service Starting (v6 - Final Signature Fix) ---")
+print("--- Ruten Proxy Service Starting (v7 - Absolute Final Fix) ---")
 print(f"RUTEN_API_KEY loaded: {'Yes' if API_KEY else 'No - PLEASE CHECK RENDER ENV VARS'}")
 print(f"RUTEN_SECRET_KEY loaded: {'Yes' if SECRET_KEY else 'No - PLEASE CHECK RENDER ENV VARS'}")
 print(f"RUTEN_SALT_KEY loaded: {'Yes' if SALT_KEY else 'No - PLEASE CHECK RENDER ENV VARS'}")
@@ -73,12 +73,15 @@ def ruten_proxy():
 
     params = {k: v for k, v in request.args.items() if k != 'endpoint'}
     
-    # **== FINAL FIX v2: Ensure 'status=all' is included for product list ==**
-    # The /product/list endpoint requires 'status' to be part of the signed URL.
     if endpoint == '/api/v1/product/list':
-        params.setdefault('status', 'all') # If 'status' is not present, add it.
+        params.setdefault('status', 'all')
 
-    query_string = urlencode(params)
+    # **== FINAL FIX v3: Sort query parameters for consistent signature ==**
+    # The order of query parameters affects the URL and thus the signature.
+    # Sorting them by key (alphabetically) ensures a consistent order.
+    sorted_params = dict(sorted(params.items()))
+    query_string = urlencode(sorted_params)
+    
     full_url = f"{BASE_URL}{endpoint}?{query_string}"
 
     timestamp = str(int(time.time()))
@@ -108,7 +111,8 @@ def ruten_proxy():
         print(f"[ERROR] HTTP Error from Ruten: {e}")
         try:
             error_details = e.response.json()
-            message = error_details.get('error_msg', '露天 API 回傳錯誤')
+            # 將露天的錯誤訊息直接回傳給前端
+            message = error_details.get('error_msg', '露天 API 回傳了一個無法解析的錯誤')
         except:
             message = str(e)
         return jsonify({"message": f"API 請求錯誤: {message}", "status_code": e.response.status_code}), e.response.status_code
@@ -119,7 +123,7 @@ def ruten_proxy():
 
 @app.route('/')
 def index():
-    return "Ruten API Proxy is running (v6 - Final Signature Fix)."
+    return "Ruten API Proxy is running (v7 - Absolute Final Fix)."
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
