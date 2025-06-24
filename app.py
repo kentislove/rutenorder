@@ -12,12 +12,12 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# 手動附加 CORS 標頭，這是最可靠的跨域解決方案。
+# 手動附加 CORS 標頭
 @app.after_request
 def after_request(response):
     """在每個請求後附加 CORS 標頭"""
     response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-RT-Key,X-RT-Timestamp,X-RT-Authorization')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
     response.headers.add('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
     return response
 
@@ -26,49 +26,52 @@ API_KEY = os.getenv('RUTEN_API_KEY')
 SECRET_KEY = os.getenv('RUTEN_SECRET_KEY')
 SALT_KEY = os.getenv('RUTEN_SALT_KEY')
 
-# 增加啟動日誌，確認環境變數是否成功載入
-print("--- Ruten Proxy Service Starting (v7 - Absolute Final Fix) ---")
+print("--- Ruten Proxy Service Starting (v8 - Verification Update) ---")
 print(f"RUTEN_API_KEY loaded: {'Yes' if API_KEY else 'No - PLEASE CHECK RENDER ENV VARS'}")
-print(f"RUTEN_SECRET_KEY loaded: {'Yes' if SECRET_KEY else 'No - PLEASE CHECK RENDER ENV VARS'}")
-print(f"RUTEN_SALT_KEY loaded: {'Yes' if SALT_KEY else 'No - PLEASE CHECK RENDER ENV VARS'}")
-print("------------------------------------")
-
+# We don't print the actual keys for security reasons.
 
 BASE_URL = "https://partner.ruten.com.tw"
 
-def generate_signature(url_path: str, timestamp: str, request_body: str = "") -> str:
-    """生成 HMAC-SHA256 簽章"""
-    if not all([SALT_KEY, SECRET_KEY]):
-        raise ValueError("缺少 SALT_KEY 或 SECRET_KEY 環境變數")
+def _make_ruten_request(endpoint: str, params: dict):
+    """一個通用的函數，用於準備並發送請求到露天"""
+    if not all([API_KEY, SECRET_KEY, SALT_KEY]):
+        raise ValueError("伺服器未設定露天 API 憑證")
 
-    sign_string = f"{SALT_KEY}{url_path}{request_body}{timestamp}"
+    sorted_params = dict(sorted(params.items()))
+    query_string = urlencode(sorted_params)
+    full_url = f"{BASE_URL}{endpoint}?{query_string}"
     
+    timestamp = str(int(time.time()))
+    
+    # 產生簽章
+    sign_string = f"{SALT_KEY}{full_url}{timestamp}"
     print(f"String to be signed: {sign_string}")
-
     signature = hmac.new(
         SECRET_KEY.encode('utf-8'),
         sign_string.encode('utf-8'),
         hashlib.sha256
     ).hexdigest()
-    return signature
+
+    headers = {
+        'User-Agent': 'Ruten-Proxy-App/1.0',
+        'X-RT-Key': API_KEY,
+        'X-RT-Timestamp': timestamp,
+        'X-RT-Authorization': signature
+    }
+    
+    print(f"--> Forwarding request to Ruten: {full_url}")
+    response = requests.get(full_url, headers=headers, timeout=20)
+    response.raise_for_status()
+    return response.json()
+
 
 @app.route('/api/ruten', methods=['GET', 'OPTIONS'])
 def ruten_proxy():
-    """
-    代理 API 端點，接收前端請求，並安全地呼叫露天 API
-    """
     if request.method == 'OPTIONS':
         return '', 200
 
     endpoint = request.args.get('endpoint')
-    print(f"==> Received GET request for endpoint: {endpoint}")
-
-    if not all([API_KEY, SECRET_KEY, SALT_KEY]):
-        print("[ERROR] Server API credentials are not set.")
-        return jsonify({"message": "錯誤：伺服器未設定露天 API 憑證"}), 500
-
     if not endpoint:
-        print(f"[ERROR] 'endpoint' parameter is missing.")
         return jsonify({"message": "錯誤：未提供目標 'endpoint' 參數"}), 400
 
     params = {k: v for k, v in request.args.items() if k != 'endpoint'}
@@ -76,54 +79,52 @@ def ruten_proxy():
     if endpoint == '/api/v1/product/list':
         params.setdefault('status', 'all')
 
-    # **== FINAL FIX v3: Sort query parameters for consistent signature ==**
-    # The order of query parameters affects the URL and thus the signature.
-    # Sorting them by key (alphabetically) ensures a consistent order.
-    sorted_params = dict(sorted(params.items()))
-    query_string = urlencode(sorted_params)
-    
-    full_url = f"{BASE_URL}{endpoint}?{query_string}"
-
-    timestamp = str(int(time.time()))
     try:
-        signature = generate_signature(full_url, timestamp, request_body="")
-    except ValueError as e:
-        print(f"[ERROR] Signature generation failed: {e}")
-        return jsonify({"message": str(e)}), 500
+        ruten_response = _make_ruten_request(endpoint, params)
+        return jsonify(ruten_response)
+    except Exception as e:
+        # 處理 HTTP 錯誤和一般錯誤
+        message = str(e)
+        status_code = 500
+        if isinstance(e, requests.exceptions.HTTPError):
+            status_code = e.response.status_code
+            try:
+                # 嘗試解析露天回傳的 JSON 錯誤訊息
+                error_details = e.response.json()
+                message = error_details.get('error_msg', '露天 API 回傳了一個無法解析的錯誤')
+            except:
+                pass
+        print(f"[ERROR] An error occurred: {message}")
+        return jsonify({"message": f"請求失敗: {message}"}), status_code
 
-    headers = {
-        'User-Agent': 'rutne-api',
-        'X-RT-Key': API_KEY,
-        'X-RT-Timestamp': timestamp,
-        'X-RT-Authorization': signature
-    }
 
+@app.route('/api/verify', methods=['GET', 'OPTIONS'])
+def verify_credentials():
+    """專門用來驗證憑證的端點"""
+    if request.method == 'OPTIONS':
+        return '', 200
+        
+    print("==> Received request for /api/verify")
     try:
-        print(f"--> Forwarding request to Ruten: {full_url}")
-        print(f"--> With headers: {headers}")
-        response = requests.get(full_url, headers=headers, timeout=20)
-        response.raise_for_status()
-        
-        print(f"<-- Received response from Ruten, status: {response.status_code}")
-        return jsonify(response.json())
+        # 嘗試呼叫一個最基本的 API (查詢第1頁的1筆資料)
+        _make_ruten_request('/api/v1/product/list', {'status': 'all', 'offset': 1, 'limit': 1})
+        # 如果沒有拋出異常，表示成功
+        return jsonify({"message": "憑證有效！與露天 API 通訊成功。", "valid": True})
+    except Exception as e:
+        message = str(e)
+        if isinstance(e, requests.exceptions.HTTPError):
+            try:
+                error_details = e.response.json()
+                message = error_details.get('error_msg', '露天 API 回傳了一個無法解析的錯誤')
+            except:
+                pass
+        print(f"[ERROR] Verification failed: {message}")
+        return jsonify({"message": f"憑證無效或請求失敗: {message}", "valid": False}), 401
 
-    except requests.exceptions.HTTPError as e:
-        print(f"[ERROR] HTTP Error from Ruten: {e}")
-        try:
-            error_details = e.response.json()
-            # 將露天的錯誤訊息直接回傳給前端
-            message = error_details.get('error_msg', '露天 API 回傳了一個無法解析的錯誤')
-        except:
-            message = str(e)
-        return jsonify({"message": f"API 請求錯誤: {message}", "status_code": e.response.status_code}), e.response.status_code
-        
-    except requests.exceptions.RequestException as e:
-        print(f"[ERROR] Network request exception: {e}")
-        return jsonify({"message": f"請求露天 API 時發生網路錯誤: {str(e)}"}), 503
 
 @app.route('/')
 def index():
-    return "Ruten API Proxy is running (v7 - Absolute Final Fix)."
+    return "Ruten API Proxy is running (v8 - Verification Update)."
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
