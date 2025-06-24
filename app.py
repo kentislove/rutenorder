@@ -12,15 +12,14 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# **== CORS 最終修正 ==**
-# 移除 flask_cors 套件，改用 Flask 的 after_request 機制手動附加 CORS 標頭。
-# 這是最直接且最可靠的跨域解決方案。
+# **== CORS 最終修正 v2 ==**
+# 手動附加 CORS 標頭，這是最可靠的跨域解決方案。
 @app.after_request
 def after_request(response):
     """在每個請求後附加 CORS 標頭"""
     response.headers.add('Access-Control-Allow-Origin', '*')
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-RT-Key,X-RT-Timestamp,X-RT-Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
     return response
 
 # 從環境變數讀取您的露天 API 金鑰
@@ -28,9 +27,8 @@ API_KEY = os.getenv('RUTEN_API_KEY')
 SECRET_KEY = os.getenv('RUTEN_SECRET_KEY')
 SALT_KEY = os.getenv('RUTEN_SALT_KEY')
 
-# **== 增加啟動日誌 ==**
-# 透過日誌確認環境變數是否成功載入
-print("--- Ruten Proxy Service Starting ---")
+# 增加啟動日誌，確認環境變數是否成功載入
+print("--- Ruten Proxy Service Starting (v3 - Final) ---")
 print(f"RUTEN_API_KEY loaded: {'Yes' if API_KEY else 'No - PLEASE CHECK RENDER ENV VARS'}")
 print(f"RUTEN_SECRET_KEY loaded: {'Yes' if SECRET_KEY else 'No - PLEASE CHECK RENDER ENV VARS'}")
 print(f"RUTEN_SALT_KEY loaded: {'Yes' if SALT_KEY else 'No - PLEASE CHECK RENDER ENV VARS'}")
@@ -52,14 +50,19 @@ def generate_signature(url_path: str, timestamp: str) -> str:
     ).hexdigest()
     return signature
 
-@app.route('/api/ruten', methods=['GET'])
+@app.route('/api/ruten', methods=['GET', 'OPTIONS']) # **<-- KEY CHANGE: Added 'OPTIONS'**
 def ruten_proxy():
     """
     代理 API 端點，接收前端請求，並安全地呼叫露天 API
     """
-    # **== 增加請求日誌 ==**
+    # **== KEY CHANGE: Handle preflight 'OPTIONS' request ==**
+    if request.method == 'OPTIONS':
+        # 回傳一個空的成功回應，讓瀏覽器的 preflight check 通過
+        return '', 200
+
+    # -- The rest of the function handles the 'GET' request --
     endpoint = request.args.get('endpoint')
-    print(f"==> Received request for endpoint: {endpoint}")
+    print(f"==> Received GET request for endpoint: {endpoint}")
 
     if not all([API_KEY, SECRET_KEY, SALT_KEY]):
         print("[ERROR] Server API credentials are not set.")
@@ -69,12 +72,10 @@ def ruten_proxy():
         print(f"[ERROR] 'endpoint' parameter is missing.")
         return jsonify({"message": "錯誤：未提供目標 'endpoint' 參數"}), 400
 
-    # 組合露天 API 的完整 URL
     params = {k: v for k, v in request.args.items() if k != 'endpoint'}
     query_string = urlencode(params)
     full_url = f"{BASE_URL}{endpoint}?{query_string}"
 
-    # 產生簽章
     timestamp = str(int(time.time()))
     try:
         signature = generate_signature(full_url, timestamp)
@@ -90,7 +91,6 @@ def ruten_proxy():
 
     try:
         print(f"--> Forwarding request to Ruten: {full_url}")
-        # 向真正的露天 API 發送請求
         response = requests.get(full_url, headers=headers, timeout=20)
         response.raise_for_status()
         
@@ -112,9 +112,8 @@ def ruten_proxy():
 
 @app.route('/')
 def index():
-    return "Ruten API Proxy is running (v2 - Manual CORS)."
+    return "Ruten API Proxy is running (v3 - Final)."
 
-# 本地測試時，可以直接執行此檔案
-# python app.py
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
+
