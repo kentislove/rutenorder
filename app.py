@@ -27,7 +27,7 @@ SECRET_KEY = os.getenv('RUTEN_SECRET_KEY')
 SALT_KEY = os.getenv('RUTEN_SALT_KEY')
 
 # 增加啟動日誌，確認環境變數是否成功載入
-print("--- Ruten Proxy Service Starting (v4 - Signature Fix) ---")
+print("--- Ruten Proxy Service Starting (v5 - Final Fix) ---")
 print(f"RUTEN_API_KEY loaded: {'Yes' if API_KEY else 'No - PLEASE CHECK RENDER ENV VARS'}")
 print(f"RUTEN_SECRET_KEY loaded: {'Yes' if SECRET_KEY else 'No - PLEASE CHECK RENDER ENV VARS'}")
 print(f"RUTEN_SALT_KEY loaded: {'Yes' if SALT_KEY else 'No - PLEASE CHECK RENDER ENV VARS'}")
@@ -36,17 +36,14 @@ print("------------------------------------")
 
 BASE_URL = "https://partner.ruten.com.tw"
 
-# **== SIGNATURE FIX ==**
-# 修正簽章產生邏輯，使其與原始 class 檔案一致
 def generate_signature(url_path: str, timestamp: str, request_body: str = "") -> str:
     """生成 HMAC-SHA256 簽章"""
     if not all([SALT_KEY, SECRET_KEY]):
         raise ValueError("缺少 SALT_KEY 或 SECRET_KEY 環境變數")
 
-    # **關鍵修正**: 簽章字串必須包含 request_body，即使它是空的。
     sign_string = f"{SALT_KEY}{url_path}{request_body}{timestamp}"
     
-    print(f"String to be signed: {sign_string}") # 增加日誌以供除錯
+    print(f"String to be signed: {sign_string}")
 
     signature = hmac.new(
         SECRET_KEY.encode('utf-8'),
@@ -80,13 +77,15 @@ def ruten_proxy():
 
     timestamp = str(int(time.time()))
     try:
-        # **關鍵修正**: 為 GET 請求傳遞一個空字串作為 request_body
         signature = generate_signature(full_url, timestamp, request_body="")
     except ValueError as e:
         print(f"[ERROR] Signature generation failed: {e}")
         return jsonify({"message": str(e)}), 500
 
+    # **== FINAL FIX: Add the User-Agent header ==**
+    # 這是露天 API 要求的關鍵標頭之一，之前遺漏了。
     headers = {
+        'User-Agent': 'rutne-api',
         'X-RT-Key': API_KEY,
         'X-RT-Timestamp': timestamp,
         'X-RT-Authorization': signature
@@ -94,6 +93,7 @@ def ruten_proxy():
 
     try:
         print(f"--> Forwarding request to Ruten: {full_url}")
+        print(f"--> With headers: {headers}") # 增加日誌以供除錯
         response = requests.get(full_url, headers=headers, timeout=20)
         response.raise_for_status()
         
@@ -115,7 +115,7 @@ def ruten_proxy():
 
 @app.route('/')
 def index():
-    return "Ruten API Proxy is running (v4 - Signature Fix)."
+    return "Ruten API Proxy is running (v5 - Final Fix)."
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
