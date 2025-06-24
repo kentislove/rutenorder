@@ -26,9 +26,8 @@ API_KEY = os.getenv('RUTEN_API_KEY')
 SECRET_KEY = os.getenv('RUTEN_SECRET_KEY')
 SALT_KEY = os.getenv('RUTEN_SALT_KEY')
 
-print("--- Ruten Proxy Service Starting (v8 - Verification Update) ---")
+print("--- Ruten Proxy Service Starting (v9 - Final Signature Fix) ---")
 print(f"RUTEN_API_KEY loaded: {'Yes' if API_KEY else 'No - PLEASE CHECK RENDER ENV VARS'}")
-# We don't print the actual keys for security reasons.
 
 BASE_URL = "https://partner.ruten.com.tw"
 
@@ -43,8 +42,12 @@ def _make_ruten_request(endpoint: str, params: dict):
     
     timestamp = str(int(time.time()))
     
-    # 產生簽章
-    sign_string = f"{SALT_KEY}{full_url}{timestamp}"
+    # **== FINAL FIX v4: Re-add the empty request body to the signature string ==**
+    # The signature string MUST be: salt + url + body + timestamp.
+    # For GET requests, the body is an empty string "". This was the bug.
+    request_body = ""
+    sign_string = f"{SALT_KEY}{full_url}{request_body}{timestamp}"
+    
     print(f"String to be signed: {sign_string}")
     signature = hmac.new(
         SECRET_KEY.encode('utf-8'),
@@ -83,13 +86,11 @@ def ruten_proxy():
         ruten_response = _make_ruten_request(endpoint, params)
         return jsonify(ruten_response)
     except Exception as e:
-        # 處理 HTTP 錯誤和一般錯誤
         message = str(e)
         status_code = 500
         if isinstance(e, requests.exceptions.HTTPError):
             status_code = e.response.status_code
             try:
-                # 嘗試解析露天回傳的 JSON 錯誤訊息
                 error_details = e.response.json()
                 message = error_details.get('error_msg', '露天 API 回傳了一個無法解析的錯誤')
             except:
@@ -106,9 +107,8 @@ def verify_credentials():
         
     print("==> Received request for /api/verify")
     try:
-        # 嘗試呼叫一個最基本的 API (查詢第1頁的1筆資料)
+        # 嘗試呼叫一個最基本的 API
         _make_ruten_request('/api/v1/product/list', {'status': 'all', 'offset': 1, 'limit': 1})
-        # 如果沒有拋出異常，表示成功
         return jsonify({"message": "憑證有效！與露天 API 通訊成功。", "valid": True})
     except Exception as e:
         message = str(e)
@@ -124,7 +124,7 @@ def verify_credentials():
 
 @app.route('/')
 def index():
-    return "Ruten API Proxy is running (v8 - Verification Update)."
+    return "Ruten API Proxy is running (v9 - Final Signature Fix)."
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
