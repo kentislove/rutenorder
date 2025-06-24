@@ -12,7 +12,6 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# **== CORS 最終修正 v2 ==**
 # 手動附加 CORS 標頭，這是最可靠的跨域解決方案。
 @app.after_request
 def after_request(response):
@@ -28,7 +27,7 @@ SECRET_KEY = os.getenv('RUTEN_SECRET_KEY')
 SALT_KEY = os.getenv('RUTEN_SALT_KEY')
 
 # 增加啟動日誌，確認環境變數是否成功載入
-print("--- Ruten Proxy Service Starting (v3 - Final) ---")
+print("--- Ruten Proxy Service Starting (v4 - Signature Fix) ---")
 print(f"RUTEN_API_KEY loaded: {'Yes' if API_KEY else 'No - PLEASE CHECK RENDER ENV VARS'}")
 print(f"RUTEN_SECRET_KEY loaded: {'Yes' if SECRET_KEY else 'No - PLEASE CHECK RENDER ENV VARS'}")
 print(f"RUTEN_SALT_KEY loaded: {'Yes' if SALT_KEY else 'No - PLEASE CHECK RENDER ENV VARS'}")
@@ -37,12 +36,18 @@ print("------------------------------------")
 
 BASE_URL = "https://partner.ruten.com.tw"
 
-def generate_signature(url_path: str, timestamp: str) -> str:
+# **== SIGNATURE FIX ==**
+# 修正簽章產生邏輯，使其與原始 class 檔案一致
+def generate_signature(url_path: str, timestamp: str, request_body: str = "") -> str:
     """生成 HMAC-SHA256 簽章"""
     if not all([SALT_KEY, SECRET_KEY]):
         raise ValueError("缺少 SALT_KEY 或 SECRET_KEY 環境變數")
 
-    sign_string = f"{SALT_KEY}{url_path}{timestamp}"
+    # **關鍵修正**: 簽章字串必須包含 request_body，即使它是空的。
+    sign_string = f"{SALT_KEY}{url_path}{request_body}{timestamp}"
+    
+    print(f"String to be signed: {sign_string}") # 增加日誌以供除錯
+
     signature = hmac.new(
         SECRET_KEY.encode('utf-8'),
         sign_string.encode('utf-8'),
@@ -50,17 +55,14 @@ def generate_signature(url_path: str, timestamp: str) -> str:
     ).hexdigest()
     return signature
 
-@app.route('/api/ruten', methods=['GET', 'OPTIONS']) # **<-- KEY CHANGE: Added 'OPTIONS'**
+@app.route('/api/ruten', methods=['GET', 'OPTIONS'])
 def ruten_proxy():
     """
     代理 API 端點，接收前端請求，並安全地呼叫露天 API
     """
-    # **== KEY CHANGE: Handle preflight 'OPTIONS' request ==**
     if request.method == 'OPTIONS':
-        # 回傳一個空的成功回應，讓瀏覽器的 preflight check 通過
         return '', 200
 
-    # -- The rest of the function handles the 'GET' request --
     endpoint = request.args.get('endpoint')
     print(f"==> Received GET request for endpoint: {endpoint}")
 
@@ -78,7 +80,8 @@ def ruten_proxy():
 
     timestamp = str(int(time.time()))
     try:
-        signature = generate_signature(full_url, timestamp)
+        # **關鍵修正**: 為 GET 請求傳遞一個空字串作為 request_body
+        signature = generate_signature(full_url, timestamp, request_body="")
     except ValueError as e:
         print(f"[ERROR] Signature generation failed: {e}")
         return jsonify({"message": str(e)}), 500
@@ -112,7 +115,7 @@ def ruten_proxy():
 
 @app.route('/')
 def index():
-    return "Ruten API Proxy is running (v3 - Final)."
+    return "Ruten API Proxy is running (v4 - Signature Fix)."
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
