@@ -27,7 +27,7 @@ SECRET_KEY = os.getenv('RUTEN_SECRET_KEY')
 SALT_KEY = os.getenv('RUTEN_SALT_KEY')
 
 # 增加啟動日誌，確認環境變數是否成功載入
-print("--- Ruten Proxy Service Starting (v5 - Final Fix) ---")
+print("--- Ruten Proxy Service Starting (v6 - Final Signature Fix) ---")
 print(f"RUTEN_API_KEY loaded: {'Yes' if API_KEY else 'No - PLEASE CHECK RENDER ENV VARS'}")
 print(f"RUTEN_SECRET_KEY loaded: {'Yes' if SECRET_KEY else 'No - PLEASE CHECK RENDER ENV VARS'}")
 print(f"RUTEN_SALT_KEY loaded: {'Yes' if SALT_KEY else 'No - PLEASE CHECK RENDER ENV VARS'}")
@@ -72,6 +72,12 @@ def ruten_proxy():
         return jsonify({"message": "錯誤：未提供目標 'endpoint' 參數"}), 400
 
     params = {k: v for k, v in request.args.items() if k != 'endpoint'}
+    
+    # **== FINAL FIX v2: Ensure 'status=all' is included for product list ==**
+    # The /product/list endpoint requires 'status' to be part of the signed URL.
+    if endpoint == '/api/v1/product/list':
+        params.setdefault('status', 'all') # If 'status' is not present, add it.
+
     query_string = urlencode(params)
     full_url = f"{BASE_URL}{endpoint}?{query_string}"
 
@@ -82,8 +88,6 @@ def ruten_proxy():
         print(f"[ERROR] Signature generation failed: {e}")
         return jsonify({"message": str(e)}), 500
 
-    # **== FINAL FIX: Add the User-Agent header ==**
-    # 這是露天 API 要求的關鍵標頭之一，之前遺漏了。
     headers = {
         'User-Agent': 'rutne-api',
         'X-RT-Key': API_KEY,
@@ -93,7 +97,7 @@ def ruten_proxy():
 
     try:
         print(f"--> Forwarding request to Ruten: {full_url}")
-        print(f"--> With headers: {headers}") # 增加日誌以供除錯
+        print(f"--> With headers: {headers}")
         response = requests.get(full_url, headers=headers, timeout=20)
         response.raise_for_status()
         
@@ -115,7 +119,7 @@ def ruten_proxy():
 
 @app.route('/')
 def index():
-    return "Ruten API Proxy is running (v5 - Final Fix)."
+    return "Ruten API Proxy is running (v6 - Final Signature Fix)."
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
