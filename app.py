@@ -26,7 +26,7 @@ API_KEY = os.getenv('RUTEN_API_KEY')
 SECRET_KEY = os.getenv('RUTEN_SECRET_KEY')
 SALT_KEY = os.getenv('RUTEN_SALT_KEY')
 
-print("--- Ruten Proxy Service Starting (v9 - Final Signature Fix) ---")
+print("--- Ruten Proxy Service Starting (v10 - The Real Final Fix) ---")
 print(f"RUTEN_API_KEY loaded: {'Yes' if API_KEY else 'No - PLEASE CHECK RENDER ENV VARS'}")
 
 BASE_URL = "https://partner.ruten.com.tw"
@@ -42,9 +42,6 @@ def _make_ruten_request(endpoint: str, params: dict):
     
     timestamp = str(int(time.time()))
     
-    # **== FINAL FIX v4: Re-add the empty request body to the signature string ==**
-    # The signature string MUST be: salt + url + body + timestamp.
-    # For GET requests, the body is an empty string "". This was the bug.
     request_body = ""
     sign_string = f"{SALT_KEY}{full_url}{request_body}{timestamp}"
     
@@ -55,8 +52,11 @@ def _make_ruten_request(endpoint: str, params: dict):
         hashlib.sha256
     ).hexdigest()
 
+    # **== FINAL FIX v5: Add the Content-Type header ==**
+    # The original class file included this header. It might be required by Ruten's server.
     headers = {
         'User-Agent': 'Ruten-Proxy-App/1.0',
+        'Content-Type': 'application/json',
         'X-RT-Key': API_KEY,
         'X-RT-Timestamp': timestamp,
         'X-RT-Authorization': signature
@@ -124,7 +124,7 @@ def verify_credentials():
 
 @app.route('/')
 def index():
-    return "Ruten API Proxy is running (v9 - Final Signature Fix)."
+    return "Ruten API Proxy is running (v10 - The Real Final Fix)."
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
