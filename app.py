@@ -5,6 +5,7 @@ import time
 import requests
 from urllib.parse import urlencode
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 from dotenv import load_dotenv
 
 # 從 .env 文件載入環境變數 (本地測試用)
@@ -12,22 +13,24 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# 手動附加 CORS 標頭
-@app.after_request
-def after_request(response):
-    """在每個請求後附加 CORS 標頭"""
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
-    return response
+# **== 部署到網站的最終設定 ==**
+# 為了安全性，我們不再允許所有來源(*)。
+# 請將 YOUR_WEBSITE_DOMAIN.com 換成您網站的確切網址。
+# 例如： origins = ["https://www.my-cool-shop.com", "https://my-cool-shop.com"]
+# 如果您在本地測試時，也可以加入 "http://localhost:8000"
+origins = ["https://kentware.com"] 
+CORS(app, resources={r"/api/*": {"origins": origins}})
+
 
 # 從環境變數讀取您的露天 API 金鑰
 API_KEY = os.getenv('RUTEN_API_KEY')
 SECRET_KEY = os.getenv('RUTEN_SECRET_KEY')
 SALT_KEY = os.getenv('RUTEN_SALT_KEY')
 
-print("--- Ruten Proxy Service Starting (v10 - The Real Final Fix) ---")
+print("--- Ruten Proxy Service Starting (Production Mode) ---")
+print(f"Allowed Origins: {origins}")
 print(f"RUTEN_API_KEY loaded: {'Yes' if API_KEY else 'No - PLEASE CHECK RENDER ENV VARS'}")
+
 
 BASE_URL = "https://partner.ruten.com.tw"
 
@@ -45,15 +48,12 @@ def _make_ruten_request(endpoint: str, params: dict):
     request_body = ""
     sign_string = f"{SALT_KEY}{full_url}{request_body}{timestamp}"
     
-    print(f"String to be signed: {sign_string}")
     signature = hmac.new(
         SECRET_KEY.encode('utf-8'),
         sign_string.encode('utf-8'),
         hashlib.sha256
     ).hexdigest()
 
-    # **== FINAL FIX v5: Add the Content-Type header ==**
-    # The original class file included this header. It might be required by Ruten's server.
     headers = {
         'User-Agent': 'Ruten-Proxy-App/1.0',
         'Content-Type': 'application/json',
@@ -62,7 +62,6 @@ def _make_ruten_request(endpoint: str, params: dict):
         'X-RT-Authorization': signature
     }
     
-    print(f"--> Forwarding request to Ruten: {full_url}")
     response = requests.get(full_url, headers=headers, timeout=20)
     response.raise_for_status()
     return response.json()
@@ -105,9 +104,7 @@ def verify_credentials():
     if request.method == 'OPTIONS':
         return '', 200
         
-    print("==> Received request for /api/verify")
     try:
-        # 嘗試呼叫一個最基本的 API
         _make_ruten_request('/api/v1/product/list', {'status': 'all', 'offset': 1, 'limit': 1})
         return jsonify({"message": "憑證有效！與露天 API 通訊成功。", "valid": True})
     except Exception as e:
@@ -124,8 +121,10 @@ def verify_credentials():
 
 @app.route('/')
 def index():
-    return "Ruten API Proxy is running (v10 - The Real Final Fix)."
+    return "Ruten API Proxy is running (Production Mode)."
 
 if __name__ == '__main__':
+    # 這段是本地測試用的，部署到 Render 時不會執行
+    # 若要在本地測試，請記得將您的 localhost 加入 origins 列表
     app.run(debug=True, port=5001)
 
